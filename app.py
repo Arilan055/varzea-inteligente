@@ -92,9 +92,22 @@ st.metric(
 
 st.write("Modelo utilizado: Regressão Linear")
 
+st.write("Modelo utilizado: Regressão Linear")
+
 st.write(
     f"Erro médio no teste histórico: {erro:.2f} cm"
-    
+)
+
+st.warning(
+    "Previsão experimental baseada em poucos dados. "
+    "O erro informado foi medido em um teste limitado "
+    "e não garante precisão futura. "
+    "Não utilizar como alerta oficial."
+)
+
+st.caption("Fonte das medições: Porto de Manaus")
+
+# Créditos do desenvolvedor
 st.markdown("---")
 
 st.markdown("""
@@ -110,14 +123,3 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
-
-)
-
-st.warning(
-    "Previsão experimental baseada em poucos dados. "
-    "O erro informado foi medido em um teste limitado "
-    "e não garante precisão futura. "
-    "Não utilizar como alerta oficial."
-)
-
-st.caption("Fonte das medições: Porto de Manaus")
