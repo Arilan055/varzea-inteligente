@@ -94,6 +94,23 @@ st.write("Modelo utilizado: Regressão Linear")
 
 st.write(
     f"Erro médio no teste histórico: {erro:.2f} cm"
+    
+st.markdown("---")
+
+st.markdown("""
+<div style="text-align:center; padding:25px;">
+    <p style="color:#94a3b8;">
+        🌊 Idealizado e desenvolvido por
+    </p>
+    <h3 style="color:#38bdf8;">
+        Arilan da Silva
+    </h3>
+    <p style="color:#94a3b8;font-size:12px;">
+        © 2026 | Várzea Inteligente
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
 )
 
 st.warning(
