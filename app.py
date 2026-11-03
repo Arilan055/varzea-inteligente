@@ -182,6 +182,119 @@ st.caption(
     "As séries ainda usam bases de datas diferentes."
 )
 
+import matplotlib.pyplot as plt
+
+st.divider()
+st.subheader("🗓️ Explore 27 anos do Rio Negro")
+
+try:
+    hist = pd.read_csv(
+        "rio_negro_treino_experimental.csv"
+    )
+
+    hist["data"] = pd.to_datetime(hist["data"])
+    hist["nivel"] = pd.to_numeric(
+        hist["nivel"], errors="coerce"
+    )
+
+    hist["corrigido"] = (
+        hist["corrigido"].astype(str)
+        .str.lower().isin(["true", "1", "sim"])
+    )
+
+    hist = hist.dropna(
+        subset=["data", "nivel"]
+    ).sort_values("data")
+
+    periodo = st.selectbox(
+        "Escolha o período:",
+        [
+            "Últimos 30 dias da base",
+            "Últimos 12 meses da base",
+            "Selecionar ano",
+            "Todo o histórico"
+        ]
+    )
+
+    fim = hist["data"].max()
+
+    if periodo == "Últimos 30 dias da base":
+        inicio = fim - pd.Timedelta(days=29)
+        filtrado = hist[hist["data"] >= inicio]
+
+    elif periodo == "Últimos 12 meses da base":
+        inicio = fim - pd.DateOffset(years=1)
+        filtrado = hist[hist["data"] >= inicio]
+
+    elif periodo == "Selecionar ano":
+        anos = sorted(
+            hist["data"].dt.year.unique(),
+            reverse=True
+        )
+        ano = st.selectbox("Escolha o ano:", anos)
+
+        filtrado = hist[
+            hist["data"].dt.year == ano
+        ]
+
+    else:
+        filtrado = hist
+
+    fig, ax = plt.subplots(figsize=(11, 4))
+
+    ax.plot(
+        filtrado["data"],
+        filtrado["nivel"],
+        color="#1683c2",
+        linewidth=1.7,
+        label="Série histórica tratada"
+    )
+
+    corrigidos = filtrado[filtrado["corrigido"]]
+
+    if not corrigidos.empty:
+        ax.scatter(
+            corrigidos["data"],
+            corrigidos["nivel"],
+            color="#f97316",
+            s=24,
+            label="Valores estimados",
+            zorder=3
+        )
+
+    ax.set_ylabel("Cota (m)")
+    ax.set_xlabel("Data")
+    ax.grid(alpha=0.25)
+    ax.legend()
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    st.pyplot(fig)
+    plt.close(fig)
+
+    st.caption(
+        f"Período: "
+        f"{filtrado['data'].min():%d/%m/%Y} até "
+        f"{filtrado['data'].max():%d/%m/%Y}"
+    )
+
+    st.metric(
+        "Registros exibidos", len(filtrado)
+    )
+
+    st.warning(
+        "Base histórica experimental derivada "
+        "de fonte secundária, com valores "
+        "interpolados identificados em laranja. "
+        "Ainda necessita conferência oficial."
+    )
+
+except FileNotFoundError:
+    st.error(
+        "Envie rio_negro_treino_experimental.csv "
+        "ao GitHub para exibir o histórico."
+    )
+
 st.subheader("🧭 Informações para seu contexto")
 perfil = st.selectbox("Qual é o seu perfil?", ["Morador ribeirinho", "Comerciante", "Transportador fluvial"])
 
