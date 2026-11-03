@@ -1,311 +1,204 @@
-import pandas as pd
+"""Várzea Inteligente — painel educacional (Missão 35).
+
+Este aplicativo usa uma base histórica experimental e uma tabela de previsões
+já calculadas. Não faz inferências em tempo real e não emite alertas oficiais.
+"""
+from pathlib import Path
+
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import pandas as pd
 import streamlit as st
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error
 
 st.set_page_config(page_title="Várzea Inteligente", page_icon="🌊", layout="centered")
 
-st.markdown("## 🌊 Várzea Inteligente")
-st.caption("Rio Negro — Manaus | Monitoramento e previsão experimental")
+PASTA = Path(__file__).resolve().parent
+HISTORICO = PASTA / "rio_negro_treino_experimental.csv"
+PREVISOES = PASTA / "previsoes_experimentais.csv"
+
+
+@st.cache_data(show_spinner=False)
+def carregar_historico(caminho: str) -> pd.DataFrame:
+    dados = pd.read_csv(caminho)
+    obrigatorias = {"data", "nivel", "corrigido"}
+    ausentes = obrigatorias - set(dados.columns)
+    if ausentes:
+        raise ValueError(f"Colunas ausentes na base histórica: {', '.join(sorted(ausentes))}")
+    dados["data"] = pd.to_datetime(dados["data"], errors="coerce")
+    dados["nivel"] = pd.to_numeric(dados["nivel"], errors="coerce")
+    dados["corrigido"] = dados["corrigido"].astype(str).str.strip().str.lower().isin(
+        ["true", "1", "sim"]
+    )
+    dados = (
+        dados.dropna(subset=["data", "nivel"])
+        .sort_values("data")
+        .drop_duplicates("data", keep="last")
+        .reset_index(drop=True)
+    )
+    if dados.empty:
+        raise ValueError("A base histórica não contém registros utilizáveis.")
+    return dados
+
+
+@st.cache_data(show_spinner=False)
+def carregar_previsoes(caminho: str) -> pd.DataFrame:
+    dados = pd.read_csv(caminho)
+    obrigatorias = {"data", "dias", "previsao_m"}
+    ausentes = obrigatorias - set(dados.columns)
+    if ausentes:
+        raise ValueError(f"Colunas ausentes no arquivo de previsões: {', '.join(sorted(ausentes))}")
+    dados["data"] = pd.to_datetime(dados["data"], format="%d/%m/%Y", errors="coerce")
+    dados["dias"] = pd.to_numeric(dados["dias"], errors="coerce")
+    dados["previsao_m"] = pd.to_numeric(dados["previsao_m"], errors="coerce")
+    dados = dados.dropna(subset=["data", "dias", "previsao_m"]).sort_values("dias")
+    if dados.empty:
+        raise ValueError("Arquivo de previsões vazio ou com datas inválidas.")
+    return dados
+
+
+st.title("🌊 Várzea Inteligente")
+st.caption("Rio Negro — Manaus | Histórico e previsões experimentais")
 
 try:
-    df = pd.read_csv("rio_negro.csv")
-    if not {"data", "nivel"}.issubset(df.columns):
-        st.error("O CSV precisa ter as colunas 'data' e 'nivel'.")
-        st.stop()
-    df["data"] = pd.to_datetime(df["data"], errors="coerce")
-    df["nivel"] = pd.to_numeric(df["nivel"], errors="coerce")
-    df = df.dropna(subset=["data", "nivel"]).sort_values("data")
-    df = df.drop_duplicates(subset="data", keep="last").reset_index(drop=True)
-except FileNotFoundError:
-    st.error("Arquivo rio_negro.csv não encontrado ao lado de app.py.")
+    historico = carregar_historico(str(HISTORICO))
+except (FileNotFoundError, ValueError, pd.errors.ParserError) as exc:
+    st.error("Não foi possível carregar a base histórica da pesquisa.")
+    st.code(str(exc))
+    st.info("Confirme se rio_negro_treino_experimental.csv está no mesmo diretório que app.py.")
     st.stop()
 
-if len(df) < 12:
-    st.error("São necessários pelo menos 12 registros consecutivos para esta demonstração.")
-    st.stop()
-
-if not df["data"].diff().dropna().dt.days.eq(1).all():
-    st.error("A série tem dias ausentes. Corrija o CSV antes de usar o modelo.")
-    st.stop()
-
-ultimo = float(df["nivel"].iloc[-1])
-inicial = float(df["nivel"].iloc[0])
-variacao_cm = (ultimo - inicial) * 100
-ultima_data = df["data"].max()
+ultimo_dia = historico["data"].max()
+ultimos_30 = historico.loc[historico["data"] >= ultimo_dia - pd.Timedelta(days=29)].copy()
+primeiro_30 = float(ultimos_30["nivel"].iloc[0])
+ultimo_nivel = float(ultimos_30["nivel"].iloc[-1])
+variacao_30 = 100 * (ultimo_nivel - primeiro_30)
 
 col1, col2 = st.columns(2)
-col1.metric("Última cota da base", f"{ultimo:.2f} m")
-col2.metric("Variação no período", f"{variacao_cm:+.0f} cm")
-
-if variacao_cm < 0:
-    st.info("📉 Tendência observada no período: descida")
-elif variacao_cm > 0:
-    st.info("📈 Tendência observada no período: subida")
+col1.metric("Última cota na base", f"{ultimo_nivel:.2f} m")
+col2.metric("Variação nos últimos 30 dias da base", f"{variacao_30:+.0f} cm")
+if variacao_30 > 0:
+    st.info("📈 Tendência no período: subida")
+elif variacao_30 < 0:
+    st.info("📉 Tendência no período: descida")
 else:
-    st.info("➖ Sem variação entre primeiro e último registro")
+    st.info("➖ Sem variação líquida no período")
 
-st.caption(f"Último registro da base: {ultima_data:%d/%m/%Y} — não é leitura em tempo real.")
+st.caption(
+    f"Último registro da série: {ultimo_dia:%d/%m/%Y}. "
+    "Base experimental, não é medição em tempo real."
+)
 
-st.subheader("📊 Histórico do Rio Negro")
+st.subheader("📊 Últimos 30 dias da base")
 fig, ax = plt.subplots(figsize=(9, 4))
-ax.plot(df["data"], df["nivel"], color="#1878b9", linewidth=2.5)
+ax.plot(ultimos_30["data"], ultimos_30["nivel"], color="#1878b9", linewidth=2.4)
+estimados_30 = ultimos_30[ultimos_30["corrigido"]]
+if not estimados_30.empty:
+    ax.scatter(estimados_30["data"], estimados_30["nivel"], color="#f97316", s=36, zorder=3)
 ax.set_ylabel("Cota (m)")
 ax.set_xlabel("Data")
-ax.set_ylim(df["nivel"].min() - 0.2, df["nivel"].max() + 0.2)
-ax.grid(alpha=0.2)
+ax.grid(alpha=0.22)
 fig.autofmt_xdate()
 fig.tight_layout()
 st.pyplot(fig)
 plt.close(fig)
 
-st.subheader("🧠 Previsão experimental com IA")
-serie = df.copy()
-serie["dia_1"] = serie["nivel"].shift(1)
-serie["dia_2"] = serie["nivel"].shift(2)
-serie = serie.dropna().reset_index(drop=True)
-features = ["dia_1", "dia_2"]
-corte = int(len(serie) * 0.7)
-treino, teste = serie.iloc[:corte], serie.iloc[corte:]
-
-modelo_teste = LinearRegression().fit(treino[features], treino["nivel"])
-prev_teste = modelo_teste.predict(teste[features])
-erro_ia = mean_absolute_error(teste["nivel"], prev_teste) * 100
-erro_basico = mean_absolute_error(teste["nivel"], teste["dia_1"]) * 100
-
-modelo = LinearRegression().fit(serie[features], serie["nivel"])
-entrada = pd.DataFrame([{"dia_1": ultimo, "dia_2": float(df["nivel"].iloc[-2])}])
-prev = float(modelo.predict(entrada)[0])
-prox_data = ultima_data + pd.Timedelta(days=1)
-
-st.metric(f"Estimativa para {prox_data:%d/%m/%Y}", f"{prev:.2f} m", f"{(prev - ultimo) * 100:+.1f} cm", delta_color="off")
-st.caption("Modelo: Regressão Linear | Previsão de um dia à frente")
-st.write(f"Erro médio no teste histórico ({len(teste)} dias): **{erro_ia:.2f} cm**")
-st.write(f"Erro do método básico no mesmo teste: **{erro_basico:.2f} cm**")
-st.warning("Protótipo didático com poucos dados, especialmente de vazante. Não é previsão validada para cheias ou secas e não substitui avisos oficiais.")
-
 st.divider()
-st.subheader("📅 Previsões de 1, 3 e 7 dias")
-
-st.caption(
-    "Demonstração histórica com dados até "
-    "30/10/2026. Não são previsões atuais."
-)
-
+st.subheader("🧠 Previsões históricas experimentais — 1, 3 e 7 dias")
 try:
-    previsoes_hist = pd.read_csv(
-        "previsoes_experimentais.csv"
-    )
+    previsoes = carregar_previsoes(str(PREVISOES))
+    # Validamos a âncora da previsão: data prevista menos o horizonte deve
+    # coincidir com a data de referência do arquivo histórico.
+    bases = previsoes["data"] - pd.to_timedelta(previsoes["dias"], unit="D")
+    bases_validas = (bases == ultimo_dia).all()
+    if not bases_validas:
+        st.warning(
+            "As datas das previsões não correspondem à última data da série histórica. "
+            "Confira os arquivos antes de interpretar este gráfico."
+        )
+    else:
+        st.caption(f"Estimativas calculadas usando informações até {ultimo_dia:%d/%m/%Y}.")
 
     colunas = st.columns(3)
-
-    for coluna, dias in zip(colunas, [1, 3, 7]):
-        linha = previsoes_hist[
-            previsoes_hist["dias"] == dias
-        ].iloc[0]
-
+    for coluna, horizonte in zip(colunas, [1, 3, 7]):
+        item = previsoes[previsoes["dias"] == horizonte]
         with coluna:
-            st.metric(
-                f"{dias} dia(s)",
-                f"{linha['previsao_m']:.3f} m"
-            )
-            st.caption(str(linha["data"]))
+            if item.empty:
+                st.warning(f"Sem previsão de {horizonte} dia(s)")
+            else:
+                linha = item.iloc[0]
+                st.metric(f"{horizonte} dia(s)", f"{linha['previsao_m']:.3f} m")
+                st.caption(f"{linha['data']:%d/%m/%Y}")
 
-    st.warning(
-        "Estimativas experimentais, sem "
-        "validação para alertas oficiais."
-    )
-
-except (FileNotFoundError, KeyError, IndexError):
-    st.error(
-        "Arquivo de previsões não encontrado "
-        "ou com formato incorreto."
-    )
-
-
-st.subheader("📈 Histórico e previsões da IA")
-
-prev_grafico = pd.read_csv(
-    "previsoes_experimentais.csv"
-)
-
-prev_grafico["data"] = pd.to_datetime(
-    prev_grafico["data"],
-    dayfirst=True
-)
-
-fig, ax = plt.subplots(figsize=(10, 4))
-
-# Medições históricas
-ax.plot(
-    df["data"], df["nivel"],
-    color="#1878b9",
-    linewidth=2,
-    label="Medições históricas"
-)
-
-# Estimativas experimentais
-ax.scatter(
-    prev_grafico["data"],
-    prev_grafico["previsao_m"],
-    color="#f97316",
-    s=80,
-    label="Previsões da IA",
-    zorder=3
-)
-
-for _, linha in prev_grafico.iterrows():
-    ax.annotate(
-        f"{int(linha['dias'])}d",
-        (linha["data"], linha["previsao_m"]),
-        xytext=(0, 10),
-        textcoords="offset points",
-        ha="center"
-    )
-
-ax.set_xlabel("Data")
-ax.set_ylabel("Cota do rio (m)")
-ax.legend()
-ax.grid(alpha=0.2)
-
-fig.autofmt_xdate()
-fig.tight_layout()
-
-st.pyplot(fig)
-plt.close(fig)
-
-st.caption(
-    "Linha azul: medições até 28/10/2026. "
-    "Pontos laranja: estimativas experimentais "
-    "calculadas com dados até 30/10/2026. "
-    "As séries ainda usam bases de datas diferentes."
-)
-
-import matplotlib.pyplot as plt
-
-st.divider()
-st.subheader("🗓️ Explore 27 anos do Rio Negro")
-
-try:
-    hist = pd.read_csv(
-        "rio_negro_treino_experimental.csv"
-    )
-
-    hist["data"] = pd.to_datetime(hist["data"])
-    hist["nivel"] = pd.to_numeric(
-        hist["nivel"], errors="coerce"
-    )
-
-    hist["corrigido"] = (
-        hist["corrigido"].astype(str)
-        .str.lower().isin(["true", "1", "sim"])
-    )
-
-    hist = hist.dropna(
-        subset=["data", "nivel"]
-    ).sort_values("data")
-
-    periodo = st.selectbox(
-        "Escolha o período:",
-        [
-            "Últimos 30 dias da base",
-            "Últimos 12 meses da base",
-            "Selecionar ano",
-            "Todo o histórico"
-        ]
-    )
-
-    fim = hist["data"].max()
-
-    if periodo == "Últimos 30 dias da base":
-        inicio = fim - pd.Timedelta(days=29)
-        filtrado = hist[hist["data"] >= inicio]
-
-    elif periodo == "Últimos 12 meses da base":
-        inicio = fim - pd.DateOffset(years=1)
-        filtrado = hist[hist["data"] >= inicio]
-
-    elif periodo == "Selecionar ano":
-        anos = sorted(
-            hist["data"].dt.year.unique(),
-            reverse=True
-        )
-        ano = st.selectbox("Escolha o ano:", anos)
-
-        filtrado = hist[
-            hist["data"].dt.year == ano
-        ]
-
-    else:
-        filtrado = hist
-
-    fig, ax = plt.subplots(figsize=(11, 4))
-
-    ax.plot(
-        filtrado["data"],
-        filtrado["nivel"],
-        color="#1683c2",
-        linewidth=1.7,
-        label="Série histórica tratada"
-    )
-
-    corrigidos = filtrado[filtrado["corrigido"]]
-
-    if not corrigidos.empty:
-        ax.scatter(
-            corrigidos["data"],
-            corrigidos["nivel"],
-            color="#f97316",
-            s=24,
-            label="Valores estimados",
-            zorder=3
-        )
-
-    ax.set_ylabel("Cota (m)")
+    st.subheader("📈 Medições históricas e pontos previstos")
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.plot(ultimos_30["data"], ultimos_30["nivel"], color="#1878b9", linewidth=2.2, label="Histórico")
+    ax.scatter(previsoes["data"], previsoes["previsao_m"], color="#f97316", s=60, label="Previsões experimentais", zorder=4)
+    for _, linha in previsoes.iterrows():
+        ax.annotate(f"{int(linha['dias'])}d", (linha["data"], linha["previsao_m"]),
+                    xytext=(0, 9), textcoords="offset points", ha="center", fontsize=9)
     ax.set_xlabel("Data")
-    ax.grid(alpha=0.25)
+    ax.set_ylabel("Cota (m)")
+    ax.grid(alpha=0.22)
     ax.legend()
     fig.autofmt_xdate()
     fig.tight_layout()
-
     st.pyplot(fig)
     plt.close(fig)
+    st.caption("Linha azul: histórico experimental. Pontos laranja: estimativas já geradas, não medições observadas.")
+except (FileNotFoundError, ValueError, pd.errors.ParserError) as exc:
+    st.warning("Não foi possível exibir as previsões salvas.")
+    st.code(str(exc))
 
-    st.caption(
-        f"Período: "
-        f"{filtrado['data'].min():%d/%m/%Y} até "
-        f"{filtrado['data'].max():%d/%m/%Y}"
-    )
+st.warning(
+    "Os dados incluem valores interpolados e derivam de fonte secundária. "
+    "As previsões apresentadas são resultados históricos de pesquisa, não alertas oficiais "
+    "nem projeções atualizadas automaticamente."
+)
 
-    st.metric(
-        "Registros exibidos", len(filtrado)
-    )
+st.divider()
+st.subheader("🗓️ Explore o histórico do Rio Negro")
+periodo = st.selectbox("Escolha o período", [
+    "Últimos 30 dias da base", "Últimos 12 meses da base", "Selecionar ano", "Todo o histórico"
+])
+if periodo == "Últimos 30 dias da base":
+    filtrado = ultimos_30
+elif periodo == "Últimos 12 meses da base":
+    inicio = ultimo_dia - pd.DateOffset(years=1)
+    filtrado = historico[historico["data"] >= inicio]
+elif periodo == "Selecionar ano":
+    anos = sorted(historico["data"].dt.year.unique().tolist(), reverse=True)
+    ano = st.selectbox("Escolha o ano", anos)
+    filtrado = historico[historico["data"].dt.year == ano]
+else:
+    filtrado = historico
 
-    st.warning(
-        "Base histórica experimental derivada "
-        "de fonte secundária, com valores "
-        "interpolados identificados em laranja. "
-        "Ainda necessita conferência oficial."
-    )
+fig, ax = plt.subplots(figsize=(9, 4))
+ax.plot(filtrado["data"], filtrado["nivel"], color="#1683c2", linewidth=1.6, label="Série histórica tratada")
+interp = filtrado[filtrado["corrigido"]]
+if not interp.empty:
+    ax.scatter(interp["data"], interp["nivel"], color="#f97316", s=23, label="Valores estimados", zorder=3)
+ax.set_xlabel("Data")
+ax.set_ylabel("Cota (m)")
+ax.grid(alpha=0.22)
+ax.legend()
+fig.autofmt_xdate()
+fig.tight_layout()
+st.pyplot(fig)
+plt.close(fig)
+st.caption(f"Período: {filtrado['data'].min():%d/%m/%Y} até {filtrado['data'].max():%d/%m/%Y}")
+st.metric("Dias exibidos", len(filtrado))
+st.caption(f"Valores estimados no período: {int(filtrado['corrigido'].sum())}.")
 
-except FileNotFoundError:
-    st.error(
-        "Envie rio_negro_treino_experimental.csv "
-        "ao GitHub para exibir o histórico."
-    )
-
+st.divider()
 st.subheader("🧭 Informações para seu contexto")
 perfil = st.selectbox("Qual é o seu perfil?", ["Morador ribeirinho", "Comerciante", "Transportador fluvial"])
-
 if perfil == "Morador ribeirinho":
-    st.write("Acompanhe os comunicados oficiais e planeje com antecedência deslocamentos e acesso a serviços essenciais conforme as condições locais.")
+    st.write("Acompanhe comunicados oficiais e planeje deslocamentos e acesso a serviços essenciais conforme as condições locais.")
 elif perfil == "Comerciante":
-    st.write("Considere acompanhar fornecedores, prazos de transporte e estoques durante períodos de variação acentuada dos rios.")
+    st.write("Considere monitorar fornecedores, prazos de transporte e estoques durante períodos de variação acentuada dos rios.")
 else:
-    st.write("Consulte boletins oficiais e informações locais de navegação antes de planejar rotas. A cota de Manaus não indica sozinha a navegabilidade de uma rota.")
-
-st.caption("Essas orientações são informativas, baseadas no perfil escolhido, e não são geradas pela IA nem constituem alertas de risco.")
+    st.write("Consulte boletins oficiais e informações locais de navegação antes de planejar rotas. A cota de Manaus, isoladamente, não determina a navegabilidade.")
+st.caption("Orientações gerais por perfil, não produzidas pela IA e não equivalentes a alertas de risco.")
 st.markdown("[Fonte: Porto de Manaus](https://portodemanaus.com.br/nivel-do-rio-negro/) · [Monitoramento oficial: SGB](https://sace.sgb.gov.br/amazonas/)")
 st.divider()
 st.markdown("<div style='text-align:center;color:#64748b'>🌊 Idealizado e desenvolvido por<br><strong style='font-size:1.2rem;color:#1683c2'>Arilan da Silva</strong><br>© 2026 · Várzea Inteligente</div>", unsafe_allow_html=True)
