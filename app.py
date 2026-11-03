@@ -85,6 +85,45 @@ st.write(f"Erro médio no teste histórico ({len(teste)} dias): **{erro_ia:.2f} 
 st.write(f"Erro do método básico no mesmo teste: **{erro_basico:.2f} cm**")
 st.warning("Protótipo didático com poucos dados, especialmente de vazante. Não é previsão validada para cheias ou secas e não substitui avisos oficiais.")
 
+st.divider()
+st.subheader("📅 Previsões de 1, 3 e 7 dias")
+
+st.caption(
+    "Demonstração histórica com dados até "
+    "30/10/2026. Não são previsões atuais."
+)
+
+try:
+    previsoes_hist = pd.read_csv(
+        "previsoes_experimentais.csv"
+    )
+
+    colunas = st.columns(3)
+
+    for coluna, dias in zip(colunas, [1, 3, 7]):
+        linha = previsoes_hist[
+            previsoes_hist["dias"] == dias
+        ].iloc[0]
+
+        with coluna:
+            st.metric(
+                f"{dias} dia(s)",
+                f"{linha['previsao_m']:.3f} m"
+            )
+            st.caption(str(linha["data"]))
+
+    st.warning(
+        "Estimativas experimentais, sem "
+        "validação para alertas oficiais."
+    )
+
+except (FileNotFoundError, KeyError, IndexError):
+    st.error(
+        "Arquivo de previsões não encontrado "
+        "ou com formato incorreto."
+    )
+
+
 st.subheader("🧭 Informações para seu contexto")
 perfil = st.selectbox("Qual é o seu perfil?", ["Morador ribeirinho", "Comerciante", "Transportador fluvial"])
 
