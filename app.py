@@ -124,6 +124,64 @@ except (FileNotFoundError, KeyError, IndexError):
     )
 
 
+st.subheader("📈 Histórico e previsões da IA")
+
+prev_grafico = pd.read_csv(
+    "previsoes_experimentais.csv"
+)
+
+prev_grafico["data"] = pd.to_datetime(
+    prev_grafico["data"],
+    dayfirst=True
+)
+
+fig, ax = plt.subplots(figsize=(10, 4))
+
+# Medições históricas
+ax.plot(
+    df["data"], df["nivel"],
+    color="#1878b9",
+    linewidth=2,
+    label="Medições históricas"
+)
+
+# Estimativas experimentais
+ax.scatter(
+    prev_grafico["data"],
+    prev_grafico["previsao_m"],
+    color="#f97316",
+    s=80,
+    label="Previsões da IA",
+    zorder=3
+)
+
+for _, linha in prev_grafico.iterrows():
+    ax.annotate(
+        f"{int(linha['dias'])}d",
+        (linha["data"], linha["previsao_m"]),
+        xytext=(0, 10),
+        textcoords="offset points",
+        ha="center"
+    )
+
+ax.set_xlabel("Data")
+ax.set_ylabel("Cota do rio (m)")
+ax.legend()
+ax.grid(alpha=0.2)
+
+fig.autofmt_xdate()
+fig.tight_layout()
+
+st.pyplot(fig)
+plt.close(fig)
+
+st.caption(
+    "Linha azul: medições até 28/10/2026. "
+    "Pontos laranja: estimativas experimentais "
+    "calculadas com dados até 30/10/2026. "
+    "As séries ainda usam bases de datas diferentes."
+)
+
 st.subheader("🧭 Informações para seu contexto")
 perfil = st.selectbox("Qual é o seu perfil?", ["Morador ribeirinho", "Comerciante", "Transportador fluvial"])
 
